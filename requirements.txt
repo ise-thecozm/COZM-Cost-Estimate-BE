@@ -2,9 +2,15 @@ asgiref==3.11.1
 Django==6.0.3
 django-cors-headers==4.9.0
 djangorestframework==3.16.1
+djangorestframework-simplejwt==5.5.0
 sqlparse==0.5.5
 tzdata==2025.3
 python-dotenv==1.0.0
 psycopg2-binary
 dj-database-url==2.1.0
 whitenoise==6.6.0
+requests==2.32.3
+google-generativeai==0.8.3
+reportlab==4.2.5
+openpyxl==3.1.5
+pycountry==24.6.1
