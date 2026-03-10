@@ -16,6 +16,18 @@ def _serialize(est):
     }
 
 
+def _embed_estimate(est):
+    """Generate and persist the embedding for an estimate. Silently no-ops on failure."""
+    try:
+        from core.embeddings import get_embedding, estimate_embedding_text
+        text = estimate_embedding_text(est.state, est.total_cost, est.currency)
+        embedding = get_embedding(text)
+        if embedding:
+            SavedEstimate.objects.filter(id=est.id).update(embedding=embedding)
+    except Exception:
+        pass
+
+
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 def estimates_list_create(request):
@@ -34,6 +46,7 @@ def estimates_list_create(request):
         total_cost=request.data.get('totalCost', 0),
         currency=request.data.get('currency', 'USD'),
     )
+    _embed_estimate(est)
     return Response({'success': True, 'estimate': _serialize(est)}, status=status.HTTP_201_CREATED)
 
 
@@ -53,8 +66,38 @@ def estimate_detail(request, pk):
             if field in request.data:
                 setattr(est, attr, request.data[field])
         est.save()
+        # Re-embed if the scenario data changed
+        if 'state' in request.data or 'totalCost' in request.data:
+            _embed_estimate(est)
         return Response({'success': True, 'estimate': _serialize(est)})
 
     # DELETE
     est.delete()
     return Response({'success': True})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def similar_estimates(request, pk):
+    """Return up to 5 saved estimates most similar to the given one (by embedding)."""
+    try:
+        target = SavedEstimate.objects.get(id=pk, user=request.user)
+    except SavedEstimate.DoesNotExist:
+        return Response({'error': 'Estimate not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if target.embedding is None:
+        return Response({'estimates': [], 'message': 'Embedding not available for this estimate'})
+
+    try:
+        from pgvector.django import CosineDistance
+        results = (
+            SavedEstimate.objects
+            .filter(user=request.user, embedding__isnull=False)
+            .exclude(id=pk)
+            .annotate(dist=CosineDistance('embedding', target.embedding))
+            .filter(dist__lt=0.5)
+            .order_by('dist')[:5]
+        )
+        return Response({'estimates': [_serialize(e) for e in results]})
+    except Exception:
+        return Response({'estimates': [], 'message': 'Vector search unavailable in this environment'})

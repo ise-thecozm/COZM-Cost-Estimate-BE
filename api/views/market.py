@@ -8,11 +8,48 @@ from rest_framework.response import Response
 from rest_framework import status
 
 MARKET_CACHE_TTL = 60 * 60 * 24  # 24 hours
+VECTOR_SIMILARITY_THRESHOLD = 0.10  # cosine distance; lower = more similar
 
 
 def _cache_key(country_code, city_code, currency):
     raw = f"market_{country_code}_{city_code}_{currency}"
     return hashlib.md5(raw.encode()).hexdigest()
+
+
+def _vector_lookup(city_name, country_name, currency, embedding):
+    """Search MarketInsightCache by vector similarity. Returns cached data or None."""
+    try:
+        from pgvector.django import CosineDistance
+        from core.models import MarketInsightCache
+        result = (
+            MarketInsightCache.objects
+            .filter(currency=currency, embedding__isnull=False)
+            .annotate(dist=CosineDistance('embedding', embedding))
+            .filter(dist__lt=VECTOR_SIMILARITY_THRESHOLD)
+            .order_by('dist')
+            .first()
+        )
+        return result.data if result else None
+    except Exception:
+        return None
+
+
+def _vector_store(country_code, city_code, city_label, currency, embedding, data):
+    """Upsert a market insight result into MarketInsightCache."""
+    try:
+        from core.models import MarketInsightCache
+        MarketInsightCache.objects.update_or_create(
+            country_code=country_code,
+            city_code=city_code,
+            currency=currency,
+            defaults={
+                'city_label': city_label,
+                'embedding': embedding,
+                'data': data,
+            },
+        )
+    except Exception:
+        pass
 
 
 def _fetch_from_gemini(country_code, city_code, currency):
@@ -79,7 +116,7 @@ Return the JSON block first, then the analysis."""
         import re
         json_match = re.search(r'\{[^{}]+\}', text, re.DOTALL)
         if not json_match:
-            return None
+            return None, city_name, country_name
 
         numbeo_data = json.loads(json_match.group())
 
@@ -114,7 +151,8 @@ Return the JSON block first, then the analysis."""
         if not sources:
             sources = [{'title': f'Numbeo - {city_name}', 'uri': f'https://www.numbeo.com/cost-of-living/in/{city_name.replace(" ", "-")}'}]
 
-        return {'numbeo': numbeo_data, 'localAnalysis': local_analysis, 'sources': sources}
+        result = {'numbeo': numbeo_data, 'localAnalysis': local_analysis, 'sources': sources}
+        return result, city_name, country_name
 
     except Exception as e:
         raise RuntimeError(str(e)) from e
@@ -133,13 +171,34 @@ def market_insight(request):
     if not settings.GEMINI_API_KEY:
         return Response({'error': 'GEMINI_API_KEY not configured'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    # L1: exact-match DB cache
     cache_key = _cache_key(country_code, city_code, currency)
     cached = cache.get(cache_key)
     if cached:
         return Response(cached)
 
+    # L2: vector similarity search (same currency, cosine distance < threshold)
+    from core.embeddings import get_embedding, market_embedding_text
+    from core.constants import LOCATIONS
+
+    country = next((c for c in LOCATIONS if c['code'] == country_code), None)
+    city_name = city_code
+    country_name = country_code
+    if country:
+        city = next((c for c in country.get('cities', []) if c['code'] == city_code), None)
+        city_name = city['name'] if city else city_code
+        country_name = country['name']
+
+    embedding = get_embedding(market_embedding_text(city_name, country_name))
+    if embedding:
+        similar = _vector_lookup(city_name, country_name, currency, embedding)
+        if similar:
+            cache.set(cache_key, similar, MARKET_CACHE_TTL)
+            return Response(similar)
+
+    # L3: call Gemini
     try:
-        result = _fetch_from_gemini(country_code, city_code, currency)
+        result, city_name, country_name = _fetch_from_gemini(country_code, city_code, currency)
     except Exception as e:
         return Response(
             {'error': 'Failed to fetch market data', 'details': str(e)},
@@ -151,5 +210,13 @@ def market_insight(request):
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
+    # Store in both caches
     cache.set(cache_key, result, MARKET_CACHE_TTL)
+    if embedding:
+        _vector_store(
+            country_code, city_code,
+            f"{city_name}, {country_name}",
+            currency, embedding, result,
+        )
+
     return Response(result)

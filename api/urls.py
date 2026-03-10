@@ -13,6 +13,7 @@ urlpatterns = [
     # Estimates
     path('estimates', estimates.estimates_list_create),
     path('estimates/<uuid:pk>', estimates.estimate_detail),
+    path('estimates/<uuid:pk>/similar', estimates.similar_estimates),
 
     # Market
     path('market/insight', market.market_insight),
