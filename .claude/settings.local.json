@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(venv/Scripts/pip install:*)",
-      "Bash(venv/Scripts/python:*)"
+      "Bash(venv/Scripts/python:*)",
+      "Bash(cd \"C:\\\\Users\\\\savio\\\\Documents\\\\Work\\\\The Cozm\\\\COZM-Cost-Estimate-BE\" && python manage.py test --verbosity=2 2>&1)",
+      "Bash(cd \"C:\\\\Users\\\\savio\\\\Documents\\\\Work\\\\The Cozm\\\\COZM-Cost-Estimate-BE\" && source venv/Scripts/activate && python manage.py test --verbosity=2 2>&1)",
+      "Bash(cd \"C:\\\\Users\\\\savio\\\\Documents\\\\Work\\\\The Cozm\\\\COZM-Cost-Estimate-BE\" && source venv/Scripts/activate && python manage.py check 2>&1)"
     ]
   }
 }
