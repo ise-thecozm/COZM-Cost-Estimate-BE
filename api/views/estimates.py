@@ -1,8 +1,14 @@
+from django.contrib.auth.models import User
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework import status
 from core.models import SavedEstimate
+
+
+def _get_appuser():
+    user, _ = User.objects.get_or_create(username='appuser', defaults={'is_active': True})
+    return user
 
 
 def _serialize(est):
@@ -29,18 +35,19 @@ def _embed_estimate(est):
 
 
 @api_view(['GET', 'POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def estimates_list_create(request):
+    user = _get_appuser()
     if request.method == 'GET':
         limit = int(request.query_params.get('limit', 50))
         offset = int(request.query_params.get('offset', 0))
-        qs = SavedEstimate.objects.filter(user=request.user)
+        qs = SavedEstimate.objects.filter(user=user)
         total = qs.count()
         return Response({'estimates': [_serialize(e) for e in qs[offset:offset + limit]], 'total': total})
 
     # POST
     est = SavedEstimate.objects.create(
-        user=request.user,
+        user=user,
         name=request.data.get('name', 'Untitled'),
         state=request.data.get('state', {}),
         total_cost=request.data.get('totalCost', 0),
@@ -51,10 +58,11 @@ def estimates_list_create(request):
 
 
 @api_view(['GET', 'PUT', 'DELETE'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def estimate_detail(request, pk):
+    user = _get_appuser()
     try:
-        est = SavedEstimate.objects.get(id=pk, user=request.user)
+        est = SavedEstimate.objects.get(id=pk, user=user)
     except SavedEstimate.DoesNotExist:
         return Response({'error': 'Estimate not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -77,11 +85,12 @@ def estimate_detail(request, pk):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def similar_estimates(request, pk):
     """Return up to 5 saved estimates most similar to the given one (by embedding)."""
+    user = _get_appuser()
     try:
-        target = SavedEstimate.objects.get(id=pk, user=request.user)
+        target = SavedEstimate.objects.get(id=pk, user=user)
     except SavedEstimate.DoesNotExist:
         return Response({'error': 'Estimate not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -92,7 +101,7 @@ def similar_estimates(request, pk):
         from pgvector.django import CosineDistance
         results = (
             SavedEstimate.objects
-            .filter(user=request.user, embedding__isnull=False)
+            .filter(user=user, embedding__isnull=False)
             .exclude(id=pk)
             .annotate(dist=CosineDistance('embedding', target.embedding))
             .filter(dist__lt=0.5)

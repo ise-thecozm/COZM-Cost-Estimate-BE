@@ -1,7 +1,7 @@
 import io
 from datetime import datetime
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework import status
 from django.http import HttpResponse
@@ -146,7 +146,7 @@ def _build_excel(state, result, display_currency):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def export_pdf(request):
     state = request.data.get('state', {})
     result = request.data.get('result', {})
@@ -165,7 +165,7 @@ def export_pdf(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def export_excel(request):
     state = request.data.get('state', {})
     result = request.data.get('result', {})
